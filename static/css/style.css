@@ -1,0 +1,85 @@
+/* Global Style Overrides - Premium Theme */
+:root {
+  --primary-color: #005b96;
+  --secondary-color: #03396c;
+  --accent-color: #fb8b24;
+  --background-light: #f4f4f4;
+  --text-color-dark: #222222;
+  --focus-outline: 3px solid rgba(251,139,36,0.6);
+  --border-radius: 12px;
+  --box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+body {
+  background-color: var(--background-light);
+  color: var(--text-color-dark);
+  margin: 0;
+  padding: 0;
+  font-family: 'Roboto', sans-serif;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: 'Montserrat', sans-serif;
+}
+
+.navbar {
+  box-shadow: var(--box-shadow) !important;
+}
+
+.btn-primary {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  border-radius: var(--border-radius);
+  transition: background-color 0.3s;
+}
+
+.btn-primary:hover, .btn-primary:focus {
+  background-color: #d97914;
+  border-color: #d97914;
+}
+
+.card {
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  border: none;
+  transition: transform 0.3s;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+}
+
+.form-control {
+  border-radius: var(--border-radius) !important;
+}
+
+.container, main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+footer {
+  background-color: var(--secondary-color);
+  color: white;
+  padding: 1.5rem 0;
+  text-align: center;
+}
+
+a {
+  transition: color 0.3s;
+}
+
+a:hover, a:focus {
+  color: var(--accent-color);
+  text-decoration: none;
+}
+
+.skip-link {
+  background-color: var(--accent-color) !important;
+}
+
+:focus-visible {
+  outline: var(--focus-outline) !important;
+  outline-offset: 2px;
+} 
