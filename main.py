@@ -19,8 +19,9 @@ from database import (
 )
 
 # Import answer generator components - adjust this to match your current setup
-from answer_generator import generate_answer, predict_intent, model
+from answer_generator import generate_answer, predict_intent, model,clean_answer
 from text_to_speech import text_to_speech
+from translation import translate_model,greedy_decode,word2idx_en,word2idx_te,idx2word_te
 
 # Preload model components
 # print("Preloading ML components...")
@@ -120,11 +121,13 @@ async def login(credentials: UserLogin):
 async def ask_question(request: QuestionRequest):
     try:
         # Simply use the generate_answer function from answer_generator
+        intent = predict_intent(request.question)
         answer = generate_answer(model,request.question,intent)
+        answer = clean_answer(answer)
         print(f"Generated answer: {answer}")
-        
+        translated_answer = greedy_decode(translate_model,answer,word2idx_en,word2idx_te,idx2word_te)
         # Convert answer to speech using original text_to_speech
-        audio_path = text_to_speech(answer)
+        audio_path = text_to_speech(translated_answer)
         
         # Move output.mp3 to static directory for serving
         if os.path.exists(audio_path):
