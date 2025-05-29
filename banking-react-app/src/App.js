@@ -4,16 +4,19 @@ import Navbar from './components/Navbar';
 import ChatPage from './components/ChatPage';
 import Login from './components/Login';
 import Signup from './components/Signup';
+import Home from './components/Home';
 import DemoPage from './demo/DemoPage';
 import ThemeDemo from './demo/ThemeDemo';
 import ContextDemo from './demo/ContextDemo';
 import ErrorBoundary from './components/ErrorBoundary';
-import { useTheme } from './contexts/ThemeContext';
-import { useAuth } from './contexts/AuthContext';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ToastProvider } from './contexts/ToastContext';
+import Reviews from './components/Reviews';
 import './styles/App.css';
 import './styles/ErrorBoundary.css';
 
-function App() {
+function AppContent() {
   // Use the theme context
   const { theme, isHighContrast } = useTheme();
   
@@ -40,47 +43,58 @@ function App() {
   }, [isHighContrast, theme]);
 
   return (
+    <div className={`App ${isHighContrast ? 'dark-mode' : ''}`}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route 
+          path="/chat" 
+          element={
+            <>
+              {isAuthenticated && <Navbar />}
+              {isAuthenticated ? <ChatPage /> : <Navigate to="/login" />}
+            </>
+          } 
+        />
+        <Route 
+          path="/login" 
+          element={!isAuthenticated ? <Login /> : <Navigate to="/chat" />} 
+        />
+        <Route 
+          path="/signup" 
+          element={!isAuthenticated ? <Signup /> : <Navigate to="/chat" />} 
+        />
+        <Route 
+          path="/toast-demo" 
+          element={<DemoPage />} 
+        />
+        <Route 
+          path="/theme-demo" 
+          element={<ThemeDemo />} 
+        />
+        <Route 
+          path="/context-demo" 
+          element={<ContextDemo />} 
+        />
+        <Route 
+          path="/reviews" 
+          element={<Reviews />} 
+        />
+      </Routes>
+    </div>
+  );
+}
+
+function App() {
+  return (
     <ErrorBoundary>
       <Router>
-        <div className={`App ${isHighContrast ? 'dark-mode' : ''}`}>
-          {isAuthenticated && <Navbar />}
-          <Routes>
-            <Route 
-              path="/" 
-              element={isAuthenticated ? <ChatPage /> : <Navigate to="/login" />} 
-            />
-            <Route 
-              path="/login" 
-              element={!isAuthenticated ? <Login /> : <Navigate to="/" />} 
-            />
-            <Route 
-              path="/signup" 
-              element={!isAuthenticated ? <Signup /> : <Navigate to="/" />} 
-            />
-            <Route 
-              path="/dashboard" 
-              element={
-                isAuthenticated ? 
-                  <div className={`container mt-5 ${isHighContrast ? 'text-light bg-dark' : 'bg-white'}`}>
-                    <h1>Dashboard Page</h1>
-                  </div> : 
-                  <Navigate to="/login" />
-              } 
-            />
-            <Route 
-              path="/toast-demo" 
-              element={<DemoPage />} 
-            />
-            <Route 
-              path="/theme-demo" 
-              element={<ThemeDemo />} 
-            />
-            <Route 
-              path="/context-demo" 
-              element={<ContextDemo />} 
-            />
-          </Routes>
-        </div>
+        <AuthProvider>
+          <ThemeProvider>
+            <ToastProvider>
+              <AppContent />
+            </ToastProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </Router>
     </ErrorBoundary>
   );

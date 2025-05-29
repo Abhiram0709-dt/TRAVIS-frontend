@@ -6,6 +6,11 @@ from typing import Optional, Dict, List, Any
 import os
 from datetime import datetime, timedelta
 import uuid
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Import models and database functions
 from models import UserSignup, UserLogin, UserResponse, Token, QuestionRequest
@@ -15,7 +20,12 @@ from database import (
     authenticate_user, 
     create_access_token, 
     user_helper,
-    init_db
+    init_db,
+    add_review,
+    get_reviews,
+    get_user_reviews,
+    get_user_review,
+    update_review
 )
 
 # Import answer generator components - adjust this to match your current setup
@@ -40,6 +50,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Startup event to initialize database
@@ -157,10 +168,20 @@ async def ask_question(request: QuestionRequest):
             content={"success": False, "error": str(e)}
         )
 
-# Simple test endpoint
+# Health check endpoint
 @app.get("/test")
 async def test_endpoint():
-    return {"status": "API is working correctly"}
+    try:
+        # Check MongoDB connection
+        if not await init_db():
+            raise Exception("MongoDB connection failed")
+        return {"status": "API is working correctly", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Service unavailable: {str(e)}"
+        )
 
 # Serve static files (for audio playback)
 @app.get("/static/{path:path}")
@@ -171,4 +192,108 @@ async def serve_static(path: str):
     return JSONResponse(
         status_code=status.HTTP_404_NOT_FOUND,
         content={"error": "File not found"}
-    ) 
+    )
+
+# Review endpoints
+@app.post("/api/reviews")
+async def create_review(review_data: dict, token: str = Depends(oauth2_scheme)):
+    try:
+        logger.info(f"Received review data: {review_data}")
+        logger.info(f"Received token: {token[:10]}...")  # Log first 10 chars of token
+        
+        # Validate required fields
+        required_fields = ['user_id', 'username', 'rating', 'message']
+        missing_fields = [field for field in required_fields if field not in review_data]
+        if missing_fields:
+            logger.error(f"Missing required fields: {missing_fields}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required fields: {', '.join(missing_fields)}"
+            )
+
+        # Check if user already has a review
+        existing_review = await get_user_review(review_data['user_id'])
+        if existing_review:
+            logger.info(f"User {review_data['user_id']} already has a review. Updating instead.")
+            updated_review = await update_review(existing_review['id'], review_data)
+            return {
+                "success": True,
+                "message": "Review updated successfully",
+                "review": updated_review,
+                "is_update": True
+            }
+
+        # Add new review
+        new_review = await add_review(review_data)
+        logger.info(f"Successfully added review: {new_review}")
+        
+        return {
+            "success": True,
+            "message": "Review submitted successfully",
+            "review": new_review,
+            "is_update": False
+        }
+    except HTTPException as he:
+        logger.error(f"HTTP error creating review: {str(he)}")
+        raise
+    except Exception as e:
+        logger.error(f"Error creating review: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error details: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "message": str(e)}
+        )
+
+@app.get("/api/reviews")
+async def fetch_reviews(
+    skip: int = 0,
+    limit: int = 10,
+    rating_filter: int = 0,
+    sort_by: str = "newest"
+):
+    try:
+        logger.info(f"Fetching reviews with params: skip={skip}, limit={limit}, rating_filter={rating_filter}, sort_by={sort_by}")
+        
+        # Validate sort_by parameter
+        valid_sort_options = ["newest", "oldest", "highest_rating", "lowest_rating"]
+        if sort_by not in valid_sort_options:
+            logger.warning(f"Invalid sort_by parameter: {sort_by}. Using default: newest")
+            sort_by = "newest"
+        
+        # Get reviews from database
+        reviews = await get_reviews(skip, limit, rating_filter, sort_by)
+        logger.info(f"Found {len(reviews)} reviews")
+        
+        # Log the first review for debugging
+        if reviews:
+            logger.info(f"First review sample: {reviews[0]}")
+        
+        return {
+            "success": True,
+            "reviews": reviews,
+            "total": len(reviews)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching reviews: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error details: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "message": str(e)}
+        )
+
+@app.get("/api/reviews/user/{user_id}")
+async def get_user_review_endpoint(user_id: str):
+    try:
+        review = await get_user_review(user_id)
+        return {
+            "success": True,
+            "reviews": [review] if review else []
+        }
+    except Exception as e:
+        print(f"Error getting user review: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": "Failed to get user review"}
+        ) 
