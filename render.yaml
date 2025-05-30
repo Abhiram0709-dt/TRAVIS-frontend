@@ -11,7 +11,5 @@ services:
         sync: false
       - key: MONGODB_DB_NAME
         sync: false
-      - key: HUGGING_FACE_HUB_TOKEN
-        sync: false
       - key: SECRET_KEY
         sync: false 
