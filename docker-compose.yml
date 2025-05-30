@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=${MONGODB_URL}
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - ./static:/app/static
+      - ./sentence_transformer_model:/app/sentence_transformer_model
+      - ./models:/app/models
+      - ./transformer_en_te.pth:/app/transformer_en_te.pth
+    restart: unless-stopped 
