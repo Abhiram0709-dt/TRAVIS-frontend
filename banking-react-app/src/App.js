@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import ChatPage from './components/ChatPage';
 import Login from './components/Login';
@@ -11,7 +11,7 @@ import ContextDemo from './demo/ContextDemo';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { ToastProvider } from './contexts/ToastContext';
+import { ToastProvider, useToast } from './contexts/ToastContext';
 import Reviews from './components/Reviews';
 import './styles/App.css';
 import './styles/ErrorBoundary.css';
@@ -22,6 +22,8 @@ function AppContent() {
   
   // Use the auth context
   const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const { addToast } = useToast();
 
   // Apply theme class to html and body elements
   useEffect(() => {
@@ -42,6 +44,33 @@ function AppContent() {
     };
   }, [isHighContrast, theme]);
 
+  // Add global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Alt + C: Go to chat
+      if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        if (isAuthenticated) {
+          navigate('/chat');
+        } else {
+          const synth = window.speechSynthesis;
+          const utterance = new SpeechSynthesisUtterance("Please login to access the chat page");
+          synth.speak(utterance);
+          addToast({
+            title: 'Authentication Required',
+            message: 'Please login to access the chat page',
+            type: 'warning',
+            duration: 3000
+          });
+          navigate('/login');
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isAuthenticated, navigate, addToast]);
+
   return (
     <div className={`App ${isHighContrast ? 'dark-mode' : ''}`}>
       <Routes>
@@ -51,17 +80,17 @@ function AppContent() {
           element={
             <>
               {isAuthenticated && <Navbar />}
-              {isAuthenticated ? <ChatPage /> : <Navigate to="/login" />}
+              {isAuthenticated ? <ChatPage /> : <Navigate to="/login" replace />}
             </>
           } 
         />
         <Route 
           path="/login" 
-          element={!isAuthenticated ? <Login /> : <Navigate to="/chat" />} 
+          element={!isAuthenticated ? <Login /> : <Navigate to="/" replace />} 
         />
         <Route 
           path="/signup" 
-          element={!isAuthenticated ? <Signup /> : <Navigate to="/chat" />} 
+          element={!isAuthenticated ? <Signup /> : <Navigate to="/" replace />} 
         />
         <Route 
           path="/toast-demo" 

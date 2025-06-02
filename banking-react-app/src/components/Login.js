@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUniversity, faEnvelope, faLock, faSignInAlt } from '@fortawesome/free-solid-svg-icons';
@@ -16,6 +16,8 @@ const Login = () => {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const hasAnnounced = useRef(false);
+  const synth = useRef(window.speechSynthesis);
   
   const navigate = useNavigate();
   const { addToast } = useToast();
@@ -25,9 +27,21 @@ const Login = () => {
     // Add animation class to body when component mounts
     document.body.classList.add('auth-background');
     
+    // Speak welcome message only once
+    if (!hasAnnounced.current) {
+      // Cancel any ongoing speech
+      synth.current.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance("Welcome to the login page. Please enter your email and password to sign in.");
+      synth.current.speak(utterance);
+      hasAnnounced.current = true;
+    }
+    
     // Clean up animation classes when component unmounts
     return () => {
       document.body.classList.remove('auth-background');
+      synth.current.cancel();
+      hasAnnounced.current = false;
     };
   }, []);
 
@@ -57,25 +71,6 @@ const Login = () => {
     
     setError('');
     
-    // In development mode, use dev login
-    if (DEV_MODE) {
-      const result = devLogin();
-      
-      if (result.success) {
-        setSuccess('Login successful! Redirecting...');
-        
-        // Add success animation
-        document.querySelector('.auth-card').classList.add('success-animation');
-        
-        // Redirect after animation
-        setTimeout(() => {
-          navigate('/');
-        }, 1500);
-      }
-      
-      return;
-    }
-    
     // Regular login
     const result = await login(credentials);
     
@@ -93,6 +88,25 @@ const Login = () => {
       setError(result.message || 'Invalid credentials');
     }
   };
+
+  // Also update the dev mode login
+  if (DEV_MODE) {
+    const result = devLogin();
+    
+    if (result.success) {
+      setSuccess('Login successful! Redirecting...');
+      
+      // Add success animation
+      document.querySelector('.auth-card').classList.add('success-animation');
+      
+      // Redirect after animation
+      setTimeout(() => {
+        navigate('/');
+      }, 1500);
+    }
+    
+    return;
+  }
 
   return (
     <div className="auth-container">

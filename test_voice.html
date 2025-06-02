@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .test-button {
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Voice Test Page</h1>
+    
+    <button class="test-button" onclick="testVoice()">Test Voice</button>
+    
+    <div class="status" id="status">
+        Click the button above to test voice synthesis.
+    </div>
+
+    <script>
+        function testVoice() {
+            const status = document.getElementById('status');
+            
+            // Check if browser supports speech synthesis
+            if (!window.speechSynthesis) {
+                status.innerHTML = '❌ Your browser does not support speech synthesis.<br>Please use Chrome, Edge, or Safari.';
+                return;
+            }
+
+            try {
+                // Create a new utterance
+                const utterance = new SpeechSynthesisUtterance('Hello! This is a test of the voice synthesis system.');
+                
+                // Set up event handlers
+                utterance.onstart = function() {
+                    status.innerHTML = '✅ Speaking...';
+                };
+                
+                utterance.onend = function() {
+                    status.innerHTML = '✅ Voice test completed. Did you hear the message?';
+                };
+                
+                utterance.onerror = function(event) {
+                    status.innerHTML = '❌ Error: ' + event.error;
+                };
+
+                // Speak the text
+                window.speechSynthesis.speak(utterance);
+                
+            } catch (error) {
+                status.innerHTML = '❌ Error: ' + error.message;
+            }
+        }
+
+        // Test on page load
+        window.onload = function() {
+            const status = document.getElementById('status');
+            if (!window.speechSynthesis) {
+                status.innerHTML = '❌ Your browser does not support speech synthesis.<br>Please use Chrome, Edge, or Safari.';
+            } else {
+                status.innerHTML = '✅ Speech synthesis is supported in your browser.<br>Click the button above to test.';
+            }
+        };
+    </script>
+</body>
+</html> 

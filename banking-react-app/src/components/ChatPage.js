@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DateTime } from 'luxon';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
@@ -18,6 +18,8 @@ import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import { useToast } from '../contexts/ToastContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import config from '../config';
 import '../styles/ChatPage.css';
 
@@ -28,11 +30,13 @@ const API_BASE_URL = config.API_BASE_URL;
 const DEV_MODE = config.IS_DEVELOPMENT;
 
 const ChatPage = () => {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
       type: 'assistant',
-      content: 'Welcome to Banking Assistant! How can I help you today?',
+      content: 'Welcome to TRAVIS chat! You can type your message or use voice input. Press Alt + O to enable typing, Alt + S to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + C to go to chat, and Alt + H for help.',
       audioPath: null,
       time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
     }
@@ -51,6 +55,8 @@ const ChatPage = () => {
   });
   const audioRefs = useRef({});
   const messagesEndRef = useRef(null);
+  const hasAnnounced = useRef(false);
+  const synth = useRef(window.speechSynthesis);
   
   // Use the toast context
   const { addToast } = useToast();
@@ -80,22 +86,17 @@ const ChatPage = () => {
     localStorage.setItem('audioVolume', volume.toString());
   }, [volume]);
   
-  // Initialize chat
-  useEffect(() => {
-    // Initialize speech recognition
-    initializeSpeechRecognition();
+  const speak = (text) => {
+    if (!autoVoiceOutput) return;
     
-    // Show welcome toast
-    addToast({
-      title: 'Welcome!',
-      message: 'How can I assist with your banking needs today?',
-      type: 'success',
-      duration: config.TOAST_DURATION.MEDIUM
-    });
-    
-    // Set theme
-    document.body.setAttribute('data-theme', theme);
-  }, []);
+    try {
+      const synth = window.speechSynthesis;
+      const utterance = new SpeechSynthesisUtterance(text);
+      synth.speak(utterance);
+    } catch (error) {
+      console.error('Error in speech synthesis:', error);
+    }
+  };
   
   const addMessage = (message) => {
     console.log('Adding message:', message);
@@ -290,7 +291,7 @@ const ChatPage = () => {
     }
   };
   
-  const handleSpeechRecognition = () => {
+  const handleSpeechRecognition = useCallback(() => {
     if (!recognition) {
       console.error("Speech recognition not initialized.");
       addToast({ title: 'Error', message: 'Voice input is not ready.', type: 'error' });
@@ -306,16 +307,15 @@ const ChatPage = () => {
       if (isRecording) {
         console.log('Stopping speech recognition');
         currentRecognition.stop();
-        setIsRecording(false); // Explicitly set state here too
+        setIsRecording(false);
       } else {
         console.log('Starting speech recognition');
         try {
           currentRecognition.start();
-          // onstart event will set isRecording to true
+          speak("Listening");
         } catch (error) {
-          // Handle potential errors like starting too soon after stopping
           console.error('Error starting speech recognition:', error);
-          setIsRecording(false); // Ensure recording state is false if start fails
+          setIsRecording(false);
           addToast({
             title: 'Voice Input Error',
             message: 'Could not start voice input. Please try again shortly.',
@@ -324,9 +324,9 @@ const ChatPage = () => {
         }
       }
     }
-  };
+  }, [recognition, isRecording, addToast]);
   
-  const handleSubmit = async (message) => {
+  const handleSubmit = useCallback(async (message) => {
     if (!message.trim() || isProcessing) return;
     
     // Auto-add question mark if needed
@@ -440,7 +440,7 @@ const ChatPage = () => {
         currentRequestId.current = null;
       }
     }
-  };
+  }, [isProcessing, autoVoiceOutput, addToast]);
   
   const playAudio = (messageId, audioPath) => {
     // Stop any currently playing audio
@@ -540,7 +540,7 @@ const ChatPage = () => {
         {
           id: 'welcome',
           type: 'assistant',
-          content: 'Welcome to Banking Assistant! How can I help you today?',
+          content: 'Welcome to TRAVIS chat! You can type your message or use voice input. Press Alt + O to enable typing, Alt + S to send message, and Alt + V to start voice input. Press Alt + H for help.',
           audioPath: null,
           time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
         }
@@ -690,6 +690,110 @@ const ChatPage = () => {
               lowerText === starter
            );
   };
+
+  // Initialize chat
+  useEffect(() => {
+    // Initialize speech recognition
+    initializeSpeechRecognition();
+    
+    // Speak welcome message only once
+    if (!hasAnnounced.current) {
+      // Cancel any ongoing speech
+      synth.current.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance("Welcome to TRAVIS chat. Press Alt + H for help.");
+      synth.current.speak(utterance);
+      hasAnnounced.current = true;
+    }
+    
+    // Show welcome toast
+    addToast({
+      title: 'Welcome!',
+      message: 'How can I assist with your banking needs today?',
+      type: 'success',
+      duration: config.TOAST_DURATION.MEDIUM
+    });
+    
+    // Set theme
+    document.body.setAttribute('data-theme', theme);
+
+    // Clean up
+    return () => {
+      synth.current.cancel();
+      hasAnnounced.current = false;
+    };
+  }, []);
+
+  // Add keyboard shortcuts - moved after all function declarations
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Alt + O: Enable typing
+      if (e.altKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        const textarea = document.querySelector('textarea.form-control');
+        if (textarea) {
+          textarea.focus();
+          textarea.disabled = false;
+          speak("Chat input enabled. Type your message and press Alt + S to send.");
+        }
+      }
+      
+      // Alt + S: Send message
+      if (e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        const textarea = document.querySelector('textarea.form-control');
+        if (textarea && textarea.value.trim()) {
+          handleSubmit(textarea.value);
+          textarea.value = ''; // Clear input after sending
+          textarea.disabled = true; // Disable input after sending
+          // Reset textarea height
+          textarea.style.height = 'auto';
+        }
+      }
+      
+      // Alt + V: Toggle voice and start recording
+      if (e.altKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        if (!isRecording) {
+          handleSpeechRecognition();
+        }
+      }
+
+      // Alt + B: Go back to home
+      if (e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        navigate('/');
+        speak("Going back to home page");
+      }
+
+      // Alt + C: Go to chat
+      if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        if (isAuthenticated) {
+          navigate('/chat');
+          speak("Going to chat page");
+        } else {
+          speak("Please login to access the chat page");
+          addToast({
+            title: 'Authentication Required',
+            message: 'Please login to access the chat page',
+            type: 'warning',
+            duration: config.TOAST_DURATION.MEDIUM
+          });
+          navigate('/login');
+        }
+      }
+
+      // Alt + H: Help
+      if (e.altKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        speak("Available shortcuts: Alt + O to enable typing, Alt + S to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + C to go to chat, and Alt + H for help.");
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording, handleSubmit, handleSpeechRecognition, navigate, isAuthenticated, addToast]);
 
   return (
     <main id="main-content" className="main-container">

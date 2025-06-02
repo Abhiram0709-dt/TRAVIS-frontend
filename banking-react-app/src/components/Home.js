@@ -57,6 +57,9 @@ const Home = () => {
     const featuresRef = useRef(null);
     const aboutRef = useRef(null);
     const contactRef = useRef(null);
+    const [isTTSEnabled, setIsTTSEnabled] = useState(true);
+    const synth = window.speechSynthesis;
+    const voices = useRef([]);
 
     useEffect(() => {
         // Initialize AOS
@@ -139,8 +142,13 @@ const Home = () => {
     };
 
     const handleLogout = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         await logout();
+        addToast({
+            title: 'Logged Out',
+            message: 'You have been successfully logged out',
+            type: 'success'
+        });
     };
 
     const handleReviewSubmit = async (e) => {
@@ -245,6 +253,101 @@ const Home = () => {
             });
         }
     };
+
+    // Initialize speech synthesis
+    useEffect(() => {
+        const loadVoices = () => {
+            voices.current = synth.getVoices();
+            if (voices.current.length === 0) {
+                synth.onvoiceschanged = () => {
+                    voices.current = synth.getVoices();
+                    speakWelcomeMessage();
+                };
+            } else {
+                speakWelcomeMessage();
+            }
+        };
+
+        loadVoices();
+
+        // Backup initialization after a short delay
+        const timeoutId = setTimeout(() => {
+            if (voices.current.length === 0) {
+                loadVoices();
+            }
+        }, 1000);
+
+        return () => clearTimeout(timeoutId);
+    }, []);
+
+    const speakWelcomeMessage = () => {
+        const welcomeText = "Welcome to TRAVIS. Press Alt + H for help.";
+        speak(welcomeText);
+    };
+
+    const speak = (text) => {
+        if (!isTTSEnabled) return;
+        
+        try {
+            // Cancel any ongoing speech
+            synth.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            
+            // Try to use a female voice
+            const femaleVoice = voices.current.find(voice => voice.name.includes('female'));
+            if (femaleVoice) {
+                utterance.voice = femaleVoice;
+            }
+            
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            
+            synth.speak(utterance);
+        } catch (error) {
+            console.error('Error in speech synthesis:', error);
+        }
+    };
+
+    // Add keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            // Alt + C: Go to chat page
+            if (e.altKey && e.key.toLowerCase() === 'c') {
+                e.preventDefault();
+                navigate('/chat');
+            }
+            
+            // Alt + L: Login/Logout based on auth status
+            if (e.altKey && e.key.toLowerCase() === 'l') {
+                e.preventDefault();
+                if (isAuthenticated) {
+                    handleLogout();
+                } else {
+                    navigate('/login');
+                }
+            }
+            
+            // Alt + S: Go to signup page (only when not authenticated)
+            if (e.altKey && e.key.toLowerCase() === 's' && !isAuthenticated) {
+                e.preventDefault();
+                navigate('/signup');
+            }
+            
+            // Alt + H: Help
+            if (e.altKey && e.key.toLowerCase() === 'h') {
+                e.preventDefault();
+                const helpMessage = isAuthenticated 
+                    ? "Available shortcuts: Alt + C to go to chat page, Alt + L to logout, and Alt + H for help."
+                    : "Available shortcuts: Alt + C to go to chat page, Alt + L to login, Alt + S to signup, and Alt + H for help.";
+                speak(helpMessage);
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [navigate, isAuthenticated]);
 
     return (
         <div className="home">

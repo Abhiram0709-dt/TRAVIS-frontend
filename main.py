@@ -1,12 +1,13 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Optional, Dict, List, Any
 import os
 from datetime import datetime, timedelta
 import uuid
 import logging
+from fastapi.staticfiles import StaticFiles
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,10 +39,14 @@ from translation import translate_model,greedy_decode,word2idx_en,word2idx_te,id
 # # Load tokenizers and model
 # load_tokenizers()
 # load_model()
+
 # print("ML components preloaded successfully!")
 
 # Create app
 app = FastAPI()
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Add CORS middleware - specifically allow requests from React app
 app.add_middleware(
@@ -296,4 +301,16 @@ async def get_user_review_endpoint(user_id: str):
         return JSONResponse(
             status_code=500,
             content={"success": False, "message": "Failed to get user review"}
-        ) 
+        )
+
+# Serve the main page
+@app.get("/", response_class=HTMLResponse)
+async def get_home():
+    with open("index.html", "r") as f:
+        return f.read()
+
+# Serve the chat page
+@app.get("/chat", response_class=HTMLResponse)
+async def get_chat():
+    with open("index.html", "r") as f:
+        return f.read() 

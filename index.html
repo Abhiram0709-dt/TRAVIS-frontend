@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-container {
+            max-width: 800px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-header {
+            padding: 20px;
+            background: #007bff;
+            color: white;
+            border-radius: 15px 15px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .message {
+            margin-bottom: 15px;
+            max-width: 80%;
+        }
+        .user-message {
+            margin-left: auto;
+            background: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 15px 15px 0 15px;
+        }
+        .bot-message {
+            background: #e9ecef;
+            padding: 10px 15px;
+            border-radius: 15px 15px 15px 0;
+        }
+        .chat-input {
+            padding: 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+            border-radius: 0 0 15px 15px;
+        }
+        .input-group {
+            background: white;
+            border-radius: 25px;
+            padding: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .form-control {
+            border: none;
+            box-shadow: none !important;
+        }
+        .btn-send {
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #007bff;
+            border: none;
+        }
+        .btn-send:hover {
+            background: #0056b3;
+        }
+        .btn-send:focus {
+            box-shadow: none;
+        }
+        .typing-indicator {
+            display: none;
+            padding: 10px;
+            color: #6c757d;
+        }
+        .typing-indicator span {
+            animation: typing 1s infinite;
+            display: inline-block;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+        .accessibility-info {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: none;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        .keyboard-shortcut {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin: 0 2px;
+        }
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: #007bff;
+            color: white;
+            padding: 8px;
+            z-index: 100;
+            transition: top 0.3s;
+        }
+        .skip-link:focus {
+            top: 0;
+        }
+        .welcome-message {
+            text-align: center;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Skip to main content link for screen readers -->
+    <a href="#chat-messages" class="skip-link">Skip to chat</a>
+
+    <!-- Add debug panel -->
+    <div id="debugPanel" style="position: fixed; top: 10px; right: 10px; background: #f8f9fa; padding: 10px; border-radius: 5px; z-index: 1000;">
+        <button onclick="testSpeech()" class="btn btn-primary mb-2">Test Voice</button>
+        <div id="debugInfo" style="font-size: 12px;"></div>
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1 class="h4 mb-0">AI Assistant</h1>
+            <div class="accessibility-info" id="accessibilityInfo">
+                <h3>Keyboard Shortcuts:</h3>
+                <p><span class="keyboard-shortcut">Alt</span> + <span class="keyboard-shortcut">C</span> - Go to Chat Page</p>
+                <p><span class="keyboard-shortcut">Ctrl</span> + <span class="keyboard-shortcut">Shift</span> + <span class="keyboard-shortcut">C</span> - Focus Chat</p>
+                <p><span class="keyboard-shortcut">Ctrl</span> + <span class="keyboard-shortcut">Shift</span> + <span class="keyboard-shortcut">S</span> - Send Message</p>
+                <p><span class="keyboard-shortcut">Ctrl</span> + <span class="keyboard-shortcut">Shift</span> + <span class="keyboard-shortcut">V</span> - Toggle Voice</p>
+                <p><span class="keyboard-shortcut">Ctrl</span> + <span class="keyboard-shortcut">Shift</span> + <span class="keyboard-shortcut">H</span> - Help</p>
+            </div>
+        </div>
+        <div class="welcome-message" id="welcomeMessage">
+            <h2>Welcome to AI Assistant</h2>
+            <p>Press Ctrl + Shift + H to hear available keyboard shortcuts</p>
+        </div>
+        <div class="chat-messages" id="chat-messages" tabindex="0" role="log" aria-live="polite">
+            <!-- Messages will be added here -->
+        </div>
+        <div class="typing-indicator" id="typingIndicator">
+            AI is typing<span>.</span><span>.</span><span>.</span>
+        </div>
+        <div class="chat-input">
+            <div class="input-group">
+                <input type="text" id="userInput" class="form-control" placeholder="Type your message..." 
+                       aria-label="Type your message" role="textbox">
+                <button class="btn btn-send" id="sendButton" aria-label="Send message">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Debug information
+        function updateDebugInfo(message) {
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+            console.log(message); // Add console logging
+        }
+
+        // Speech synthesis setup
+        let synth = window.speechSynthesis;
+        let isTTSEnabled = true;
+        let voices = [];
+
+        // Force Chrome to load voices
+        function loadVoices() {
+            voices = synth.getVoices();
+            updateDebugInfo(`Initial voices loaded: ${voices.length}`);
+            
+            if (voices.length === 0) {
+                updateDebugInfo('No voices found, waiting for voices to load...');
+                // Chrome loads voices asynchronously
+                synth.onvoiceschanged = function() {
+                    voices = synth.getVoices();
+                    updateDebugInfo(`Voices loaded after event: ${voices.length}`);
+                    if (voices.length > 0) {
+                        // Only speak welcome message on the home page
+                        if (window.location.pathname === '/') {
+                            speakWelcomeMessage();
+                        }
+                    }
+                };
+            } else {
+                // Only speak welcome message on the home page
+                if (window.location.pathname === '/') {
+                    speakWelcomeMessage();
+                }
+            }
+        }
+
+        function speakWelcomeMessage() {
+            updateDebugInfo('Attempting to speak welcome message...');
+            const welcomeText = "Welcome to TRAVIS. Here are the available shortcuts: Press Alt + C to go to chat page, Ctrl + Shift + C to focus chat, Ctrl + Shift + S to send message, Ctrl + Shift + V to toggle voice, and Ctrl + Shift + H for help.";
+            speak(welcomeText);
+        }
+
+        function speak(text) {
+            if (!isTTSEnabled) {
+                updateDebugInfo('Speech is disabled');
+                return;
+            }
+            
+            try {
+                updateDebugInfo('Preparing to speak: ' + text);
+                
+                // Cancel any ongoing speech
+                synth.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                
+                // Try to use a female voice
+                const femaleVoice = voices.find(voice => voice.name.includes('female'));
+                if (femaleVoice) {
+                    utterance.voice = femaleVoice;
+                    updateDebugInfo(`Using voice: ${femaleVoice.name}`);
+                } else {
+                    updateDebugInfo('No female voice found, using default voice');
+                }
+                
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+                
+                // Add event listeners for debugging
+                utterance.onstart = () => {
+                    updateDebugInfo('Speech started');
+                    console.log('Speech started');
+                };
+                
+                utterance.onend = () => {
+                    updateDebugInfo('Speech ended');
+                    console.log('Speech ended');
+                };
+                
+                utterance.onerror = (event) => {
+                    updateDebugInfo(`Speech error: ${event.error}`);
+                    console.error('Speech error:', event.error);
+                };
+                
+                // Speak the text
+                synth.speak(utterance);
+                updateDebugInfo('Speech command sent');
+            } catch (error) {
+                console.error('Error in speech synthesis:', error);
+                updateDebugInfo(`Speech error: ${error.message}`);
+            }
+        }
+
+        // Test speech function
+        function testSpeech() {
+            updateDebugInfo('Testing speech synthesis...');
+            
+            if (!window.speechSynthesis) {
+                updateDebugInfo('Speech synthesis not supported in this browser');
+                return;
+            }
+
+            try {
+                const testUtterance = new SpeechSynthesisUtterance('Testing voice synthesis. Can you hear this?');
+                
+                // Log available voices
+                voices.forEach(voice => {
+                    updateDebugInfo(`Voice: ${voice.name} (${voice.lang})`);
+                });
+
+                // Try to use a female voice
+                const femaleVoice = voices.find(voice => voice.name.includes('female'));
+                if (femaleVoice) {
+                    testUtterance.voice = femaleVoice;
+                    updateDebugInfo(`Using voice: ${femaleVoice.name}`);
+                }
+
+                testUtterance.onstart = () => {
+                    updateDebugInfo('Test speech started');
+                    console.log('Test speech started');
+                };
+                
+                testUtterance.onend = () => {
+                    updateDebugInfo('Test speech ended');
+                    console.log('Test speech ended');
+                };
+                
+                testUtterance.onerror = (event) => {
+                    updateDebugInfo(`Test speech error: ${event.error}`);
+                    console.error('Test speech error:', event.error);
+                };
+
+                synth.speak(testUtterance);
+            } catch (error) {
+                updateDebugInfo(`Error: ${error.message}`);
+                console.error('Test speech error:', error);
+            }
+        }
+
+        // Initialize speech synthesis when the page loads
+        window.addEventListener('load', function() {
+            updateDebugInfo('Page loaded, initializing speech...');
+            // Force Chrome to load voices
+            loadVoices();
+            
+            // Backup initialization after a short delay
+            setTimeout(function() {
+                if (voices.length === 0) {
+                    updateDebugInfo('No voices loaded after delay, retrying...');
+                    loadVoices();
+                }
+            }, 1000);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            updateDebugInfo(`Key pressed: ${e.key} (Alt: ${e.altKey}, Ctrl: ${e.ctrlKey}, Shift: ${e.shiftKey})`);
+            
+            // Alt + C: Go to chat page
+            if (e.altKey && e.key.toLowerCase() === 'c') {
+                e.preventDefault();
+                updateDebugInfo('Alt+C pressed - navigating to chat');
+                speak("Navigating to chat page");
+                window.location.href = '/chat';
+            }
+            
+            // Ctrl + Shift + C: Focus chat input
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'c') {
+                e.preventDefault();
+                updateDebugInfo('Ctrl+Shift+C pressed - focusing chat');
+                document.getElementById('userInput').focus();
+                speak("Chat input focused. Type your message and press Enter or Ctrl + Shift + S to send.");
+            }
+            
+            // Ctrl + Shift + S: Send message
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                updateDebugInfo('Ctrl+Shift+S pressed - sending message');
+                sendMessage();
+            }
+            
+            // Ctrl + Shift + V: Toggle voice
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') {
+                e.preventDefault();
+                isTTSEnabled = !isTTSEnabled;
+                updateDebugInfo(`Ctrl+Shift+V pressed - voice ${isTTSEnabled ? 'enabled' : 'disabled'}`);
+                speak(isTTSEnabled ? "Voice enabled" : "Voice disabled");
+            }
+
+            // Ctrl + Shift + H: Help
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'h') {
+                e.preventDefault();
+                updateDebugInfo('Ctrl+Shift+H pressed - showing help');
+                toggleAccessibilityInfo();
+                speak("Available shortcuts: Alt + C to go to chat page, Ctrl + Shift + C to chat, Ctrl + Shift + S to send, Ctrl + Shift + V to toggle voice, and Ctrl + Shift + H for help.");
+            }
+        });
+
+        // Toggle accessibility info
+        function toggleAccessibilityInfo() {
+            const info = document.getElementById('accessibilityInfo');
+            info.style.display = info.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Send message function
+        function sendMessage() {
+            const userInput = document.getElementById('userInput');
+            const message = userInput.value.trim();
+            
+            if (message) {
+                // Add user message
+                addMessage(message, 'user');
+                userInput.value = '';
+                
+                // Show typing indicator
+                document.getElementById('typingIndicator').style.display = 'block';
+                speak("Sending message...");
+                
+                // Send to backend
+                fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide typing indicator
+                    document.getElementById('typingIndicator').style.display = 'none';
+                    
+                    // Add bot response
+                    addMessage(data.response, 'bot');
+                    speak("Received response: " + data.response);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('typingIndicator').style.display = 'none';
+                    addMessage('Sorry, there was an error processing your request.', 'bot');
+                    speak("Error processing request. Please try again.");
+                });
+            }
+        }
+
+        // Add message to chat
+        function addMessage(text, sender) {
+            const messagesDiv = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+            messageDiv.textContent = text;
+            messageDiv.setAttribute('role', 'listitem');
+            messageDiv.setAttribute('aria-label', `${sender} message: ${text}`);
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Event listeners
+        document.getElementById('sendButton').addEventListener('click', sendMessage);
+        document.getElementById('userInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Initial focus on input
+        document.getElementById('userInput').focus();
+    </script>
+</body>
+</html> 

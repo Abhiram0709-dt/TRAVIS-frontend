@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
@@ -33,6 +33,8 @@ const Signup = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const hasAnnounced = useRef(false);
+  const synth = useRef(window.speechSynthesis);
   
   const navigate = useNavigate();
   const { addToast } = useToast();
@@ -42,9 +44,21 @@ const Signup = ({ onLoginSuccess }) => {
     // Add animation class to body when component mounts
     document.body.classList.add('auth-background');
     
+    // Speak welcome message only once
+    if (!hasAnnounced.current) {
+      // Cancel any ongoing speech
+      synth.current.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance("Welcome to the signup page. Please fill in your details to create a new account.");
+      synth.current.speak(utterance);
+      hasAnnounced.current = true;
+    }
+    
     // Clean up animation classes when component unmounts
     return () => {
       document.body.classList.remove('auth-background');
+      synth.current.cancel();
+      hasAnnounced.current = false;
     };
   }, []);
 
@@ -126,6 +140,11 @@ const Signup = ({ onLoginSuccess }) => {
       const card = document.querySelector('.auth-card-inner');
       card.classList.add('flip-out');
       
+      // Speak step completion
+      synth.current.cancel();
+      const utterance = new SpeechSynthesisUtterance("Step 1 complete. Please set your login credentials.");
+      synth.current.speak(utterance);
+      
       addToast({
         title: 'Step 1 Complete',
         message: 'Please set your login credentials',
@@ -148,6 +167,11 @@ const Signup = ({ onLoginSuccess }) => {
     // Add animation class to card
     const card = document.querySelector('.auth-card-inner');
     card.classList.add('flip-out-reverse');
+    
+    // Speak step change
+    synth.current.cancel();
+    const utterance = new SpeechSynthesisUtterance("Going back to personal information.");
+    synth.current.speak(utterance);
     
     setTimeout(() => {
       setStep(1);
