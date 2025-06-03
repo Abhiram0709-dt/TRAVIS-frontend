@@ -200,35 +200,78 @@ const ChatPage = () => {
               return;
             }
             
-            const data = await response.json();
-            console.log('API response:', data);
-            
-            // Check again if the request was aborted while waiting for JSON parsing
-            if (signal.aborted) {
-              console.log('Request was aborted after response, not adding to chat');
-              return;
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
             }
             
-            if (data.success) {
-              // Create assistant message
-              const assistantMsg = {
-                id: `assistant-${Date.now()}`,
-                type: 'assistant',
-                content: data.answer || "I'm sorry, I couldn't generate a text response.",
-                audioPath: data.audio_path ? `${API_BASE_URL}${data.audio_path}` : null,
-                time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
-              };
-              
-              // Add assistant message to chat
-              console.log('Adding assistant response to chat:', assistantMsg);
-              addMessage(assistantMsg);
-              
-              // Play audio if enabled
-              if (autoVoiceOutput && data.audio_path) {
-                playAudio(assistantMsg.id, `${API_BASE_URL}${data.audio_path}`);
+            const reader = response.body.getReader();
+            let combinedMessage = null;
+            let timingInfo = null;
+
+            console.log('ChatPage (Voice): Starting to read stream...');
+
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+
+              const text = new TextDecoder().decode(value);
+              console.log('ChatPage (Voice): Received stream chunk text:', text);
+              const lines = text.split('\n');
+
+              for (const line of lines) {
+                console.log('ChatPage (Voice): Processing stream line:', line);
+                if (line.startsWith('data: ')) {
+                  const jsonString = line.slice(6);
+                  console.log('ChatPage (Voice): Identified data line, attempting JSON parse:', jsonString);
+                  const data = JSON.parse(jsonString);
+
+                  if (data.type === 'english') {
+                    console.log('ChatPage (Voice): Processing English message:', data.text);
+                    if (!combinedMessage) {
+                      combinedMessage = {
+                        id: `response-${messageId}`,
+                        type: 'assistant',
+                        content: data.text,
+                        teluguContent: '',
+                        time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
+                      };
+                      setMessages(prev => [...prev, combinedMessage]);
+                      console.log('ChatPage (Voice): Added new assistant message', combinedMessage.id, ':', combinedMessage.content);
+                    } else {
+                      setMessages(prev => prev.map(msg => 
+                        msg.id === combinedMessage.id 
+                          ? { ...msg, content: data.text }
+                          : msg
+                      ));
+                      console.log('ChatPage (Voice): Updated English content for message', combinedMessage.id, ':', data.text);
+                    }
+                  } else if (data.type === 'telugu') {
+                    console.log('ChatPage (Voice): Processing Telugu message:', data.text);
+                    if (combinedMessage) {
+                      setMessages(prev => prev.map(msg => 
+                        msg.id === combinedMessage.id 
+                          ? { ...msg, teluguContent: data.text }
+                          : msg
+                      ));
+                      console.log('ChatPage (Voice): Updated Telugu content for message', combinedMessage.id, ':', data.text);
+                    }
+                  } else if (data.type === 'complete') {
+                    console.log('ChatPage (Voice): Processing complete message:', data);
+                    if (data.audio_path && autoVoiceOutput) {
+                      const audioMessageId = `audio-${messageId}`;
+                      playAudio(audioMessageId, `${API_BASE_URL}${data.audio_path}`);
+                    }
+                  } else if (data.type === 'error') {
+                    console.error('ChatPage (Voice): Server error:', data.error);
+                    setMessages(prev => [...prev, {
+                      id: `error-${messageId}`,
+                      type: 'assistant',
+                      content: `Error: ${data.error}`,
+                      time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
+                    }]);
+                  }
+                }
               }
-            } else {
-              throw new Error(data.error || 'Failed to get response');
             }
           } catch (error) {
             // Only show error if the request wasn't aborted
@@ -365,16 +408,30 @@ const ChatPage = () => {
       let combinedMessage = null;
       let timingInfo = null;
 
+      console.log('ChatPage: response.body is:', response.body);
+      if (!response.body) {
+          console.error('ChatPage: Response body is null or undefined!');
+          throw new Error('Response body is empty.');
+      }
+
+      console.log('ChatPage: Obtained stream reader:', reader);
+      
+      console.log('ChatPage: Starting to read stream...');
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
         const text = new TextDecoder().decode(value);
+        console.log('ChatPage: Received stream chunk text:', text);
         const lines = text.split('\n');
 
         for (const line of lines) {
+          console.log('ChatPage: Processing stream line:', line);
           if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
+            const jsonString = line.slice(6);
+            console.log('ChatPage: Identified data line, attempting JSON parse:', jsonString);
+            const data = JSON.parse(jsonString);
 
             if (data.type === 'english') {
               console.log('Processing English message:', data.text);
@@ -387,12 +444,14 @@ const ChatPage = () => {
                   time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
                 };
                 setMessages(prev => [...prev, combinedMessage]);
+                console.log('ChatPage: Added new assistant message', combinedMessage.id, ':', combinedMessage.content);
               } else {
                 setMessages(prev => prev.map(msg => 
                   msg.id === combinedMessage.id 
                     ? { ...msg, content: data.text }
                     : msg
                 ));
+                console.log('ChatPage: Updated English content for message', combinedMessage.id, ':', data.text);
               }
             } else if (data.type === 'telugu') {
               console.log('Processing Telugu message:', data.text);
@@ -402,21 +461,10 @@ const ChatPage = () => {
                     ? { ...msg, teluguContent: data.text }
                     : msg
                 ));
+                console.log('ChatPage: Updated Telugu content for message', combinedMessage.id, ':', data.text);
               }
             } else if (data.type === 'complete') {
               console.log('Processing complete message:', data);
-              if (data.timing) {
-                // Format timing information
-                const timing = data.timing;
-                timingInfo = `Answer Generation: ${timing.answer_generation.toFixed(2)}s | Translation: ${timing.translation.toFixed(2)}s | Audio: ${timing.audio_generation.toFixed(2)}s | Total: ${timing.total_time.toFixed(2)}s`;
-                
-                // Add timing info to the message
-                setMessages(prev => prev.map(msg => 
-                  msg.id === combinedMessage.id 
-                    ? { ...msg, timing: timingInfo }
-                    : msg
-                ));
-              }
               if (data.audio_path && autoVoiceOutput) {
                 const audioMessageId = `audio-${requestId}`;
                 playAudio(audioMessageId, `${API_BASE_URL}${data.audio_path}`);
@@ -434,6 +482,7 @@ const ChatPage = () => {
         }
       }
     } catch (error) {
+      console.error('ChatPage: Error in handleSubmit catch block:', error);
       if (error.name !== 'AbortError') {
         console.error('Error:', error);
         setMessages(prev => [...prev, {

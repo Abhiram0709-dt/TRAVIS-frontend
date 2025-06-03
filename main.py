@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, WebSocket, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -16,6 +16,13 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import LinearSVC
 from sentence_transformers import SentenceTransformer
 import traceback
+import base64
+import pickle
+import numpy as np
+import cv2
+import face_recognition
+from fastapi.templating import Jinja2Templates
+from starlette.routing import WebSocketRoute
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +41,9 @@ from database import (
     get_reviews,
     get_user_reviews,
     get_user_review,
-    update_review
+    update_review,
+    add_face_encoding,
+    get_all_face_encodings
 )
 
 # Import answer generator components
@@ -57,6 +66,9 @@ app = FastAPI()
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Templates for serving HTML
+templates = Jinja2Templates(directory="templates")
+
 # Add CORS middleware - specifically allow requests from React app
 app.add_middleware(
     CORSMiddleware,
@@ -76,6 +88,8 @@ translate_model = None
 word2idx_en = None
 word2idx_te = None
 idx2word_te = None
+
+# --- Face Recognition Setup ---
 
 @app.on_event("startup")
 async def startup_event():
@@ -215,33 +229,27 @@ async def stream_answer(answer: str, translated_answer: str, background_task):
         logger.error(traceback.format_exc())
         yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
 
-async def process_audio(translated_answer: str, start_time: float, timing_info: dict):
+async def process_audio(translated_answer: str):
     """Process audio generation and return the result"""
     try:
         # Convert answer to speech
         audio_start = time.time()
         audio_path = text_to_speech(translated_answer)
         audio_end = time.time()
-        timing_info['audio_generation'] = round(audio_end - audio_start, 2)
-        logger.info(f"Generated audio in {timing_info['audio_generation']} seconds")
         
         # Audio file is already in static directory
         if os.path.exists(audio_path):
             # Calculate total time
-            total_time = round(time.time() - start_time, 2)
-            timing_info['total_time'] = total_time
+            total_time = round(audio_end - audio_start, 2)
             return {
                 'type': 'complete',
                 'audio_path': f'/static/{os.path.basename(audio_path)}',
-                'timing': timing_info
             }
         else:
-            total_time = round(time.time() - start_time, 2)
-            timing_info['total_time'] = total_time
+            total_time = round(time.time() - audio_start, 2)
             return {
                 'type': 'complete',
                 'audio_path': None,
-                'timing': timing_info
             }
     except Exception as e:
         logger.error(f"Background processing error: {str(e)}")
@@ -256,7 +264,6 @@ async def ask_question(request: QuestionRequest):
     async def generate():
         try:
             start_time = time.time()
-            timing_info = {}
             
             # Generate answer and predict intent
             intent_start = time.time()
@@ -264,8 +271,6 @@ async def ask_question(request: QuestionRequest):
             answer = generate_answer(model, request.question, intent)
             answer = clean_answer(answer)
             intent_end = time.time()
-            timing_info['answer_generation'] = round(intent_end - intent_start, 2)
-            logger.info(f"Generated answer in {timing_info['answer_generation']} seconds: {answer}")
             
             # Start translation
             translation_start = time.time()
@@ -291,11 +296,10 @@ async def ask_question(request: QuestionRequest):
             # Wait for translation to complete
             translated_answer = await translation_task
             translation_end = time.time()
-            timing_info['translation'] = round(translation_end - translation_start, 2)
-            logger.info(f"Translated answer in {timing_info['translation']} seconds: {translated_answer}")
+            logger.info(f"Translated answer in {round(translation_end - translation_start, 2)} seconds: {translated_answer}")
             
             # Start audio generation immediately after getting translation
-            audio_task = asyncio.create_task(process_audio(translated_answer, start_time, timing_info))
+            audio_task = asyncio.create_task(process_audio(translated_answer))
             
             # Stream Telugu translation while audio is being generated
             telugu_words = translated_answer.split()
@@ -466,4 +470,127 @@ async def get_home():
 @app.get("/chat", response_class=HTMLResponse)
 async def get_chat():
     with open("chat.html", "r") as f:
-        return f.read() 
+        return f.read()
+
+# --- Face Recognition Endpoints (Populating existing routes) ---
+
+@app.post('/api/register-face')
+async def register_face_fastapi(name: str = Form(...), face_image: UploadFile = File(...)):
+    logger.info(f"Received face registration request for user: {name}")
+    try:
+        # Read the image file
+        image_data = await face_image.read()
+        
+        # Convert bytes to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        logger.info(f"Image decoded. Shape: {img.shape if img is not None else 'None'}")
+
+        if img is None:
+            logger.error("Failed to decode image.")
+            raise HTTPException(status_code=400, detail="Could not decode image.")
+
+        # Find face locations and encodings
+        face_locations = face_recognition.face_locations(img)
+        logger.info(f"Found {len(face_locations)} face locations.")
+
+        if not face_locations:
+            logger.warning("No face found in the image for registration.")
+            raise HTTPException(status_code=400, detail="No face found in the image. Please ensure your face is clearly visible.")
+
+        face_encodings_list = face_recognition.face_encodings(img, face_locations)
+        logger.info(f"Found {len(face_encodings_list)} face encodings.")
+
+        if not face_encodings_list:
+             logger.warning("Could not generate face encoding for registration.")
+             raise HTTPException(status_code=400, detail="Could not process face. Please try again.")
+
+        # Use the first detected face encoding (convert numpy array to list for MongoDB)
+        face_encoding = face_encodings_list[0].tolist()
+
+        # Add or update the face encoding in MongoDB
+        await add_face_encoding(name, face_encoding)
+        
+        logger.info(f"Face registered successfully in MongoDB for user: {name}")
+        return {"success": True, "message": "Face registered successfully", "user": {"name": name}}
+        
+    except Exception as e:
+        logger.error(f"Error during face registration: {str(e)}")
+        logger.error(traceback.format_exc()) # Log traceback for detailed error
+        raise HTTPException(status_code=500, detail=f"Internal server error during face registration: {str(e)}")
+
+@app.post('/api/verify-face')
+async def verify_face_fastapi(face_image: UploadFile = File(...)):
+    logger.info("Received face verification request")
+    try:
+        # Read the image file
+        image_data = await face_image.read()
+        
+        # Convert bytes to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            logger.error("Failed to decode image.")
+            raise HTTPException(status_code=400, detail="Could not decode image.")
+
+        # Find face locations and encodings in the unknown image
+        unknown_face_locations = face_recognition.face_locations(img)
+
+        if not unknown_face_locations:
+            logger.warning("No face found in the image for verification.")
+            raise HTTPException(status_code=400, detail="No face found in the image. Please ensure your face is clearly visible.")
+
+        unknown_face_encodings = face_recognition.face_encodings(img, unknown_face_locations)
+
+        if not unknown_face_encodings:
+            logger.warning("Could not generate face encoding for verification.")
+            raise HTTPException(status_code=400, detail="Could not process face. Please try again.")
+
+        # Assume only one face in the unknown image for simplicity
+        unknown_face_encoding = unknown_face_encodings[0]
+
+        # Retrieve all known face encodings from MongoDB
+        all_face_docs = await get_all_face_encodings()
+        
+        if not all_face_docs:
+            logger.warning("No registered faces found in database for verification.")
+            raise HTTPException(status_code=404, detail="No registered faces found.")
+
+        # Extract encodings and names from the database documents
+        known_face_encodings_db = [doc['encoding'] for doc in all_face_docs]
+        known_face_names_db = [doc['username'] for doc in all_face_docs]
+
+        # Convert database encodings (list) back to numpy array for face_recognition library
+        known_face_encodings_np = np.array(known_face_encodings_db)
+
+        # Compare unknown face with known faces from the database
+        # tolerance: lower is stricter. 0.6 is a common value
+        matches = face_recognition.compare_faces(known_face_encodings_np, unknown_face_encoding, tolerance=0.6)
+        name = "Unknown"
+        
+        # Use the known face with the smallest distance to the unknown face
+        face_distances = face_recognition.face_distance(known_face_encodings_np, unknown_face_encoding)
+        best_match_index = np.argmin(face_distances)
+        
+        if matches[best_match_index]:
+            name = known_face_names_db[best_match_index]
+            logger.info(f"Face verified as {name}.")
+            # In a real app, you'd fetch more user details here from your main user database
+            # For now, we return a simplified user object
+            user_details = {"name": name} # Simplified user object
+            return {"success": True, "message": "Face verified successfully", "user": user_details}
+        else:
+            logger.warning("Face not recognized.")
+            raise HTTPException(status_code=401, detail="Face not recognized.")
+            
+    except Exception as e:
+        logger.error(f"Error during face verification: {str(e)}")
+        logger.error(traceback.format_exc()) # Log traceback for detailed error
+        raise HTTPException(status_code=500, detail=f"Internal server error during face verification: {str(e)}")
+
+# --- End Face Recognition Endpoints ---
+
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=5000) 

@@ -193,6 +193,8 @@ const MessageList = ({ messages, onDeleteMessage, isProcessing, processingMessag
                   onMouseEnter={() => setHoveredMessage(message.id)}
                   onMouseLeave={() => setHoveredMessage(null)}
                 >
+                  {/* Log message content before rendering */}
+                  {console.log('Rendering message:', message.id, 'Content:', message.content, 'Telugu Content:', message.teluguContent)}
                   <div className="message-header">
                     <div className="message-sender-info">
                       {message.type === 'assistant' && (

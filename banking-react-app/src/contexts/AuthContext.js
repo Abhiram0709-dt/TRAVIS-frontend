@@ -31,20 +31,28 @@ export const AuthProvider = ({ children }) => {
   const { addToast } = useToast();
 
   // Login handler
-  const login = async (credentials) => {
+  const login = async (credentials, isAuthenticatedByFace = false) => {
     setLoading(true);
     
     try {
       // Make API call to login endpoint
-      const response = await fetch(`${API_BASE_URL}/api/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(credentials)
-      });
+      let data = { success: false, message: 'API call skipped' };
       
-      const data = await response.json();
+      if (isAuthenticatedByFace) {
+        // If authenticated by face, use provided credentials as user data
+        data = { success: true, user: credentials };
+      } else {
+        // Make API call to login endpoint for password-based login
+        const response = await fetch(`${API_BASE_URL}/api/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(credentials)
+        });
+        
+        data = await response.json();
+      }
       
       if (data.success) {
         // Set auth state

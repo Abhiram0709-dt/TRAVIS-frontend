@@ -61,6 +61,10 @@ def get_users_collection():
 def get_reviews_collection():
     return db.reviews if db else None
 
+# Get face encodings collection
+def get_face_encodings_collection():
+    return db.face_encodings if db is not None else None
+
 # User model helpers
 def user_helper(user) -> dict:
     """Convert MongoDB user to dict format"""
@@ -162,6 +166,88 @@ async def authenticate_user(username: str, password: str):
         return False
     
     return user_helper(user)
+
+# Face Encoding Database Operations
+async def add_face_encoding(username: str, encoding: list) -> dict:
+    """Add or update a user's face encoding in the database"""
+    if db is None:
+        await init_db()
+    
+    face_encodings_collection = get_face_encodings_collection()
+    if face_encodings_collection is None:
+        raise Exception("Face encodings collection not initialized.")
+        
+    # Check if encoding for this username already exists
+    existing_encoding = await find_face_encoding_by_username(username)
+    
+    if existing_encoding:
+        # Update existing encoding
+        result = await face_encodings_collection.update_one(
+            {"username": username},
+            {"$set": {"encoding": encoding, "updated_at": datetime.utcnow()}}
+        )
+        if result.modified_count > 0:
+            logger.info(f"Updated face encoding for user: {username}")
+            # Retrieve and return the updated document
+            updated_doc = await face_encodings_collection.find_one({"username": username})
+            return updated_doc
+        else:
+             logger.warning(f"Face encoding for user {username} found but not modified during update.")
+             return existing_encoding # Return the existing one if no change
+    else:
+        # Add new encoding
+        face_data = {
+            "username": username,
+            "encoding": encoding,
+            "created_at": datetime.utcnow()
+        }
+        try:
+            result = await face_encodings_collection.insert_one(face_data)
+            new_doc = await face_encodings_collection.find_one({"_id": result.inserted_id})
+            logger.info(f"Added new face encoding for user: {username}")
+            return new_doc
+        except Exception as e:
+            logger.error(f"Error adding face encoding for user {username}: {str(e)}")
+            # Optionally raise an HTTPException here if insertion fails critically
+            raise e
+            
+async def get_all_face_encodings() -> list:
+    """Retrieve all face encodings from the database"""
+    if db is None:
+        await init_db()
+    
+    face_encodings_collection = get_face_encodings_collection()
+    if face_encodings_collection is None:
+         return [] # Return empty list if collection not initialized
+         
+    try:
+        # Find all documents and convert to list
+        encodings_cursor = face_encodings_collection.find()
+        all_encodings = []
+        async for doc in encodings_cursor:
+            all_encodings.append(doc)
+            
+        logger.info(f"Retrieved {len(all_encodings)} face encoding documents.")
+        return all_encodings
+    except Exception as e:
+        logger.error(f"Error retrieving all face encodings: {str(e)}")
+        return [] # Return empty list on error
+
+async def find_face_encoding_by_username(username: str):
+    """Find a face encoding document by username"""
+    if db is None:
+        await init_db()
+        
+    face_encodings_collection = get_face_encodings_collection()
+    if face_encodings_collection is None:
+         return None
+         
+    try:
+        doc = await face_encodings_collection.find_one({"username": username})
+        return doc
+    except Exception as e:
+        logger.error(f"Error finding face encoding for user {username}: {str(e)}")
+        return None
 
 # Review database operations
 async def get_user_review(user_id: str):
