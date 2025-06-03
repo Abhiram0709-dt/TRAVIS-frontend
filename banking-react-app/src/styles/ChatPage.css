@@ -345,8 +345,9 @@ body[data-theme="high-contrast"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
-  font-size: 1rem;
+  background: var(--primary-color);
+  color: white;
+  margin-right: 8px;
 }
 
 .user-message .message-avatar {
@@ -359,6 +360,8 @@ body[data-theme="high-contrast"] {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   position: relative;
   min-width: 200px;
+  max-width: 100%;
+  margin-bottom: 0.5rem;
 }
 
 .user-message .message-content {
@@ -366,6 +369,7 @@ body[data-theme="high-contrast"] {
   color: var(--user-message-text);
   border-top-right-radius: 4px;
   background: linear-gradient(120deg, #3b82f6 0%, #2563eb 100%);
+  margin-bottom: 0.25rem;
 }
 
 .assistant-message .message-content {
@@ -725,4 +729,86 @@ body[data-theme="high-contrast"] {
   .main-container {
     padding: 0;
   }
+}
+
+.message-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+[data-theme="dark"] .message-footer {
+  border-top-color: #333;
+  color: #999;
+}
+
+.message-time {
+  font-size: inherit;
+  color: inherit;
+}
+
+.message-timing {
+  font-size: inherit;
+  color: inherit;
+}
+
+.message-timing span {
+  white-space: nowrap;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.message-sender-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.telugu-label {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 1rem 0 0.5rem;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .telugu-label {
+  color: #999;
+}
+
+.telugu-text {
+  color: #2c5282;
+  font-style: italic;
+}
+
+[data-theme="dark"] .telugu-text {
+  color: #63b3ed;
+}
+
+.message-time.user-time {
+  text-align: right;
+  font-size: 0.75rem;
+  color: #666;
+  margin-top: 0.25rem;
+  padding-right: 0.5rem;
+}
+
+[data-theme="dark"] .message-time.user-time {
+  color: #999;
 } 

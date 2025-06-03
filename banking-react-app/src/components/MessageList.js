@@ -77,16 +77,7 @@ const MessageList = ({ messages, onDeleteMessage, isProcessing, processingMessag
 
   // Handle message deletion
   const handleDeleteMessage = (messageId, messageType) => {
-    let confirmMessage = 'Are you sure you want to delete this message?';
-    
-    // If it's a user message (question), make it clear the answer will also be deleted
-    if (messageType === 'user') {
-      confirmMessage = 'Delete this question and its answer?';
-    }
-    
-    if (window.confirm(confirmMessage)) {
-      onDeleteMessage(messageId);
-    }
+    onDeleteMessage(messageId, messageType);
   };
 
   // Group messages by date for date separators
@@ -204,8 +195,13 @@ const MessageList = ({ messages, onDeleteMessage, isProcessing, processingMessag
                 >
                   <div className="message-header">
                     <div className="message-sender-info">
+                      {message.type === 'assistant' && (
+                        <div className="message-avatar">
+                          <FontAwesomeIcon icon={faRobot} />
+                        </div>
+                      )}
                       <span className="message-sender">
-                        {message.type === 'user' ? 'You' : 'Banking Assistant'}
+                        {message.type === 'user' ? 'You' : ''}
                       </span>
                     </div>
                     <div className="message-actions">
@@ -219,14 +215,33 @@ const MessageList = ({ messages, onDeleteMessage, isProcessing, processingMessag
                           <FontAwesomeIcon icon={faTrash} />
                         </button>
                       )}
-                      <span className="message-time">{message.time}</span>
                     </div>
                   </div>
                   <div className="message-body">
                     <div className="message-content">
                       <p className="message-text">{message.content}</p>
+                      {message.teluguContent && (
+                        <>
+                          <div className="telugu-label">Telugu Translation:</div>
+                          <p className="message-text telugu-text">{message.teluguContent}</p>
+                        </>
+                      )}
                       {message.type === 'user' && <div className="shine-effect"></div>}
                     </div>
+                    {message.type === 'user' ? (
+                      <div className="message-time user-time">
+                        <span>{message.time}</span>
+                      </div>
+                    ) : (
+                      <div className="message-footer">
+                        <span className="message-time">{message.time}</span>
+                        {message.timing && (
+                          <div className="message-timing">
+                            <span>{message.timing}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </CSSTransition>

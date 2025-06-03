@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .chat-container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: 20%;
+        }
+        .bot-message {
+            background-color: #f5f5f5;
+            margin-right: 20%;
+        }
+        .english-message {
+            background-color: #e8f5e9;
+            margin-right: 20%;
+        }
+        .telugu-message {
+            background-color: #fff3e0;
+            margin-right: 20%;
+        }
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #1976d2;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .typing-indicator {
+            display: none;
+            color: #666;
+            font-style: italic;
+        }
+        .audio-player {
+            margin-top: 10px;
+            width: 100%;
+        }
+        .timing-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .message-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div id="chat-messages"></div>
+        <div class="typing-indicator" id="typing-indicator">Bot is typing...</div>
+    </div>
+    <div class="input-container">
+        <input type="text" id="question-input" placeholder="Type your question..." />
+        <button id="send-button">Send</button>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chat-messages');
+        const questionInput = document.getElementById('question-input');
+        const sendButton = document.getElementById('send-button');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        function addMessage(content, type = 'bot') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+            
+            // Add label for English and Telugu messages
+            if (type === 'english' || type === 'telugu') {
+                const label = document.createElement('div');
+                label.className = 'message-label';
+                label.textContent = type === 'english' ? 'English Answer:' : 'Telugu Translation:';
+                messageDiv.appendChild(label);
+            }
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.textContent = content;
+            messageDiv.appendChild(contentDiv);
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return messageDiv;  // Return the message div for updating
+        }
+
+        function addAudioPlayer(audioPath) {
+            const audioDiv = document.createElement('div');
+            audioDiv.className = 'message bot-message';
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.className = 'audio-player';
+            audio.src = audioPath;
+            audioDiv.appendChild(audio);
+            chatMessages.appendChild(audioDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addTimingInfo(timing) {
+            const timingDiv = document.createElement('div');
+            timingDiv.className = 'timing-info';
+            timingDiv.textContent = `Answer generation: ${timing.answer_generation}s | Translation: ${timing.translation}s | Audio: ${timing.audio_generation}s | Total: ${timing.total_time}s`;
+            chatMessages.appendChild(timingDiv);
+        }
+
+        async function sendQuestion() {
+            const question = questionInput.value.trim();
+            if (!question) return;
+
+            // Disable input while processing
+            questionInput.disabled = true;
+            sendButton.disabled = true;
+            typingIndicator.style.display = 'block';
+
+            // Add user message
+            addMessage(question, 'user');
+            questionInput.value = '';
+
+            // Create message containers for English and Telugu
+            let englishMessage = null;
+            let teluguMessage = null;
+
+            try {
+                console.log('Sending question:', question);
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'text/event-stream',
+                    },
+                    body: JSON.stringify({ question }),
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Server error:', response.status, errorText);
+                    throw new Error(`Server error: ${response.status} - ${errorText}`);
+                }
+
+                console.log('Response received, starting to read stream...');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        console.log('Stream complete');
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value);
+                    console.log('Received chunk:', chunk);
+                    
+                    // Split by double newlines to handle multiple events
+                    const events = chunk.split('\n\n');
+                    
+                    for (const event of events) {
+                        if (event.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(event.slice(6));
+                                console.log('Parsed data:', data);
+                                
+                                if (data.type === 'english') {
+                                    console.log('Processing English message:', data.text);
+                                    if (!englishMessage) {
+                                        englishMessage = addMessage(data.text, 'english');
+                                    } else {
+                                        englishMessage.lastChild.textContent = data.text;
+                                    }
+                                } else if (data.type === 'telugu') {
+                                    console.log('Processing Telugu message:', data.text);
+                                    if (!teluguMessage) {
+                                        teluguMessage = addMessage(data.text, 'telugu');
+                                    } else {
+                                        teluguMessage.lastChild.textContent = data.text;
+                                    }
+                                } else if (data.type === 'complete') {
+                                    console.log('Processing complete message:', data);
+                                    typingIndicator.style.display = 'none';
+                                    if (data.audio_path) {
+                                        addAudioPlayer(data.audio_path);
+                                    }
+                                    if (data.timing) {
+                                        addTimingInfo(data.timing);
+                                    }
+                                } else if (data.type === 'error') {
+                                    console.error('Server error:', data.error);
+                                    addMessage(`Error: ${data.error}`, 'bot');
+                                }
+                            } catch (e) {
+                                console.error('Error parsing data:', e, 'Event:', event);
+                                // Don't show error to user for parsing errors, just log them
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error in sendQuestion:', error);
+                addMessage(`Error: ${error.message}`, 'bot');
+            } finally {
+                // Re-enable input
+                questionInput.disabled = false;
+                sendButton.disabled = false;
+                typingIndicator.style.display = 'none';
+            }
+        }
+
+        // Event listeners
+        sendButton.addEventListener('click', sendQuestion);
+        questionInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendQuestion();
+            }
+        });
+    </script>
+</body>
+</html> 

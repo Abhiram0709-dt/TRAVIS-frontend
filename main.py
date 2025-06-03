@@ -1,13 +1,21 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Optional, Dict, List, Any
 import os
 from datetime import datetime, timedelta
 import uuid
 import logging
+import time
+import json
+import asyncio
 from fastapi.staticfiles import StaticFiles
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import LinearSVC
+from sentence_transformers import SentenceTransformer
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,10 +37,11 @@ from database import (
     update_review
 )
 
-# Import answer generator components - adjust this to match your current setup
-from answer_generator import generate_answer, predict_intent, model,clean_answer
+# Import answer generator components
+from answer_generator import generate_answer, predict_intent, clean_answer
 from text_to_speech import text_to_speech
-from translation import translate_model,greedy_decode,word2idx_en,word2idx_te,idx2word_te
+from model_loader import get_translation_components, load_models
+from translation import greedy_decode
 
 # Preload model components
 # print("Preloading ML components...")
@@ -57,6 +66,38 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Global variables for models and data
+model = None
+vectorizer = None
+label_encoder = None
+classifier = None
+translate_model = None
+word2idx_en = None
+word2idx_te = None
+idx2word_te = None
+
+@app.on_event("startup")
+async def startup_event():
+    """Load all models and data during startup"""
+    global model, vectorizer, label_encoder, classifier, translate_model, word2idx_en, word2idx_te, idx2word_te
+    
+    try:
+        # Load all models and get the answer generation model
+        model = load_models()  # This will load all models and return the answer generation model
+        
+        # Load translation components
+        translate_model, word2idx_en, word2idx_te, idx2word_te = get_translation_components()
+        
+        # Verify model is loaded
+        if model is None:
+            raise ValueError("Answer generation model failed to load")
+            
+        logger.info("All models and data loaded successfully during startup")
+    except Exception as e:
+        logger.error(f"Error loading models during startup: {str(e)}")
+        logger.error(traceback.format_exc())  # Add traceback for better error logging
+        raise
 
 # Startup event to initialize database
 @app.on_event("startup")
@@ -133,45 +174,157 @@ async def login(credentials: UserLogin):
         "token_type": "bearer"
     }
 
-@app.post("/ask")
-async def ask_question(request: QuestionRequest):
+async def stream_answer(answer: str, translated_answer: str, background_task):
+    """Stream English answer word by word, then Telugu translation, and handle audio"""
     try:
-        # Simply use the generate_answer function from answer_generator
-        intent = predict_intent(request.question)
-        answer = generate_answer(model,request.question,intent)
-        answer = clean_answer(answer)
-        print(f"Generated answer: {answer}")
-        translated_answer = greedy_decode(translate_model,answer,word2idx_en,word2idx_te,idx2word_te)
-        # Convert answer to speech using original text_to_speech
-        audio_path = text_to_speech(translated_answer)
+        logger.info("Starting to stream English answer...")
+        # Stream English answer word by word
+        english_words = answer.split()
+        current_english = ""
+        for word in english_words:
+            current_english += word + " "
+            message = f"data: {json.dumps({'type': 'english', 'text': current_english})}\n\n"
+            logger.debug(f"Sending English chunk: {message}")
+            yield message
+            await asyncio.sleep(0.1)  # Adjust delay as needed
         
-        # Move output.mp3 to static directory for serving
+        logger.info("English answer streaming complete, starting Telugu...")
+        # Add a small pause between languages
+        await asyncio.sleep(0.5)
+        
+        # Stream Telugu translation word by word
+        telugu_words = translated_answer.split()
+        current_telugu = ""
+        for word in telugu_words:
+            current_telugu += word + " "
+            message = f"data: {json.dumps({'type': 'telugu', 'text': current_telugu})}\n\n"
+            logger.debug(f"Sending Telugu chunk: {message}")
+            yield message
+            await asyncio.sleep(0.1)  # Adjust delay as needed
+        
+        logger.info("Telugu translation streaming complete, waiting for audio...")
+        # Wait for audio processing to complete
+        audio_result = await background_task
+        if audio_result:
+            message = f"data: {json.dumps(audio_result)}\n\n"
+            logger.debug(f"Sending audio result: {message}")
+            yield message
+    except Exception as e:
+        error_msg = f"Error in stream_answer: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+
+async def process_audio(translated_answer: str, start_time: float, timing_info: dict):
+    """Process audio generation and return the result"""
+    try:
+        # Convert answer to speech
+        audio_start = time.time()
+        audio_path = text_to_speech(translated_answer)
+        audio_end = time.time()
+        timing_info['audio_generation'] = round(audio_end - audio_start, 2)
+        logger.info(f"Generated audio in {timing_info['audio_generation']} seconds")
+        
+        # Audio file is already in static directory
         if os.path.exists(audio_path):
-            static_file_path = os.path.join("static", os.path.basename(audio_path))
-            with open(audio_path, "rb") as src_file:
-                with open(static_file_path, "wb") as dst_file:
-                    dst_file.write(src_file.read())
-            
-            # Return response with static path
+            # Calculate total time
+            total_time = round(time.time() - start_time, 2)
+            timing_info['total_time'] = total_time
             return {
-                "success": True,
-                "answer": answer,
-                "audio_path": f"/static/{os.path.basename(audio_path)}"
+                'type': 'complete',
+                'audio_path': f'/static/{os.path.basename(audio_path)}',
+                'timing': timing_info
             }
         else:
+            total_time = round(time.time() - start_time, 2)
+            timing_info['total_time'] = total_time
             return {
-                "success": True,
-                "answer": answer,
-                "audio_path": None
+                'type': 'complete',
+                'audio_path': None,
+                'timing': timing_info
             }
     except Exception as e:
-        print(f"Error in ask_question: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"success": False, "error": str(e)}
-        )
+        logger.error(f"Background processing error: {str(e)}")
+        return {
+            'type': 'error',
+            'error': str(e)
+        }
+
+@app.post("/ask")
+async def ask_question(request: QuestionRequest):
+    """Handle question requests"""
+    async def generate():
+        try:
+            start_time = time.time()
+            timing_info = {}
+            
+            # Generate answer and predict intent
+            intent_start = time.time()
+            intent = predict_intent(request.question)
+            answer = generate_answer(model, request.question, intent)
+            answer = clean_answer(answer)
+            intent_end = time.time()
+            timing_info['answer_generation'] = round(intent_end - intent_start, 2)
+            logger.info(f"Generated answer in {timing_info['answer_generation']} seconds: {answer}")
+            
+            # Start translation
+            translation_start = time.time()
+            translation_task = asyncio.create_task(
+                asyncio.to_thread(
+                    greedy_decode,
+                    translate_model,
+                    answer,
+                    word2idx_en,
+                    word2idx_te,
+                    idx2word_te
+                )
+            )
+            
+            # Stream English answer while translation is happening
+            english_words = answer.split()
+            current_english = ""
+            for word in english_words:
+                current_english += word + " "
+                yield f"data: {json.dumps({'type': 'english', 'text': current_english})}\n\n"
+                await asyncio.sleep(0.1)  # Small delay between words
+            
+            # Wait for translation to complete
+            translated_answer = await translation_task
+            translation_end = time.time()
+            timing_info['translation'] = round(translation_end - translation_start, 2)
+            logger.info(f"Translated answer in {timing_info['translation']} seconds: {translated_answer}")
+            
+            # Start audio generation immediately after getting translation
+            audio_task = asyncio.create_task(process_audio(translated_answer, start_time, timing_info))
+            
+            # Stream Telugu translation while audio is being generated
+            telugu_words = translated_answer.split()
+            current_telugu = ""
+            for word in telugu_words:
+                current_telugu += word + " "
+                yield f"data: {json.dumps({'type': 'telugu', 'text': current_telugu})}\n\n"
+                await asyncio.sleep(0.1)  # Small delay between words
+            
+            # Wait for audio to be ready
+            audio_result = await audio_task
+            if audio_result:
+                yield f"data: {json.dumps(audio_result)}\n\n"
+                
+        except Exception as e:
+            error_msg = f"Error in ask_question: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 # Health check endpoint
 @app.get("/test")
@@ -312,5 +465,5 @@ async def get_home():
 # Serve the chat page
 @app.get("/chat", response_class=HTMLResponse)
 async def get_chat():
-    with open("index.html", "r") as f:
+    with open("chat.html", "r") as f:
         return f.read() 

@@ -31,12 +31,12 @@ const DEV_MODE = config.IS_DEVELOPMENT;
 
 const ChatPage = () => {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, logout } = useAuth();
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
       type: 'assistant',
-      content: 'Welcome to TRAVIS chat! You can type your message or use voice input. Press Alt + O to enable typing, Alt + S to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + C to go to chat, and Alt + H for help.',
+      content: 'Welcome to TRAVIS chat! You can type your message or use voice input. Press Alt + O to enable typing, then press Enter to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + L to logout, and Alt + H for help.',
       audioPath: null,
       time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
     }
@@ -328,121 +328,129 @@ const ChatPage = () => {
   
   const handleSubmit = useCallback(async (message) => {
     if (!message.trim() || isProcessing) return;
-    
-    // Auto-add question mark if needed
-    let question = message.trim();
-    if (isQuestionButNoQuestionMark(question)) {
-      question += '?';
-    }
-    
-    // Set processing state
-    setIsProcessing(true);
-    
-    // Create user message with unique ID
-    const messageId = `user-${Date.now()}`;
-    const userMsg = {
-      id: messageId,
-      type: 'user',
-      content: question,
-      time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
-    };
-    
-    // Add user message to chat
-    console.log('Adding user text message to chat:', userMsg);
-    setMessages(prev => [...prev, userMsg]);
-    
+
+    const requestId = Date.now().toString();
+    currentRequestId.current = requestId;
+
     try {
-      // Create an AbortController for this request
+      setIsProcessing(true);
+
+      // Add user message with timing
+      const userMsg = {
+        id: `user-${requestId}`,
+        type: 'user',
+        content: message,
+        time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
+      };
+      addMessage(userMsg);
+
+      // Create abort controller for this request
       const controller = new AbortController();
-      const signal = controller.signal;
-      
-      // Store the controller reference with the message ID
-      activeRequests.current[messageId] = controller;
-      currentRequestId.current = messageId;
-      
-      // Make API call
-      console.log('Sending API request for:', question);
+      activeRequests.current[requestId] = controller;
+
       const response = await fetch(`${API_BASE_URL}/ask`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: question,
-          language: localStorage.getItem('preferredLanguage') || 'en'
-        }),
-        signal // Pass the abort signal to fetch
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ question: message }),
+        signal: controller.signal
       });
-      
-      // Check if the request was aborted
-      if (signal.aborted) {
-        console.log('Request was aborted, not processing response');
-        return;
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
-      const data = await response.json();
-      console.log('API response:', data);
-      
-      // Check again if the request was aborted while waiting for JSON parsing
-      if (signal.aborted) {
-        console.log('Request was aborted after response, not adding to chat');
-        return;
-      }
-      
-      if (data.success) {
-        // Create assistant message
-        const assistantMsg = {
-          id: `assistant-${Date.now()}`,
-          type: 'assistant',
-          content: data.answer || "I'm sorry, I couldn't generate a text response.",
-          audioPath: data.audio_path ? `${API_BASE_URL}${data.audio_path}` : null,
-          time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
-        };
-        
-        // Add assistant message to chat
-        console.log('Adding assistant response to chat:', assistantMsg);
-        setMessages(prev => [...prev, assistantMsg]);
-        
-        // Play audio if enabled
-        if (autoVoiceOutput && data.audio_path) {
-          playAudio(assistantMsg.id, `${API_BASE_URL}${data.audio_path}`);
+
+      const reader = response.body.getReader();
+      let combinedMessage = null;
+      let timingInfo = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const text = new TextDecoder().decode(value);
+        const lines = text.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.type === 'english') {
+              console.log('Processing English message:', data.text);
+              if (!combinedMessage) {
+                combinedMessage = {
+                  id: `response-${requestId}`,
+                  type: 'assistant',
+                  content: data.text,
+                  teluguContent: '',
+                  time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
+                };
+                setMessages(prev => [...prev, combinedMessage]);
+              } else {
+                setMessages(prev => prev.map(msg => 
+                  msg.id === combinedMessage.id 
+                    ? { ...msg, content: data.text }
+                    : msg
+                ));
+              }
+            } else if (data.type === 'telugu') {
+              console.log('Processing Telugu message:', data.text);
+              if (combinedMessage) {
+                setMessages(prev => prev.map(msg => 
+                  msg.id === combinedMessage.id 
+                    ? { ...msg, teluguContent: data.text }
+                    : msg
+                ));
+              }
+            } else if (data.type === 'complete') {
+              console.log('Processing complete message:', data);
+              if (data.timing) {
+                // Format timing information
+                const timing = data.timing;
+                timingInfo = `Answer Generation: ${timing.answer_generation.toFixed(2)}s | Translation: ${timing.translation.toFixed(2)}s | Audio: ${timing.audio_generation.toFixed(2)}s | Total: ${timing.total_time.toFixed(2)}s`;
+                
+                // Add timing info to the message
+                setMessages(prev => prev.map(msg => 
+                  msg.id === combinedMessage.id 
+                    ? { ...msg, timing: timingInfo }
+                    : msg
+                ));
+              }
+              if (data.audio_path && autoVoiceOutput) {
+                const audioMessageId = `audio-${requestId}`;
+                playAudio(audioMessageId, `${API_BASE_URL}${data.audio_path}`);
+              }
+            } else if (data.type === 'error') {
+              console.error('Server error:', data.error);
+              setMessages(prev => [...prev, {
+                id: `error-${requestId}`,
+                type: 'assistant',
+                content: `Error: ${data.error}`,
+                time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
+              }]);
+            }
+          }
         }
-      } else {
-        throw new Error(data.error || 'Failed to get response');
       }
     } catch (error) {
-      // Only show error if the request wasn't aborted
       if (error.name !== 'AbortError') {
-        console.error('Error processing text input:', error);
-        
-        // Add error message to chat
+        console.error('Error:', error);
         setMessages(prev => [...prev, {
-          id: `error-${Date.now()}`,
+          id: `error-${requestId}`,
           type: 'assistant',
-          content: "I'm sorry, I encountered an error while processing your request. Please try again.",
+          content: `Error: ${error.message}`,
           time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
         }]);
-        
-        // Show error toast
-        addToast({
-          title: 'Connection Error',
-          message: 'Could not connect to the server. Please try again.',
-          type: 'error'
-        });
-      } else {
-        console.log('Request was aborted:', error);
       }
     } finally {
-      // Remove from active requests
-      delete activeRequests.current[messageId];
-      
-      // Only reset processing state if this was the current request
-      if (currentRequestId.current === messageId) {
-        setIsProcessing(false);
-        currentRequestId.current = null;
-      }
+      setIsProcessing(false);
+      currentRequestId.current = null;
+      delete activeRequests.current[requestId];
     }
-  }, [isProcessing, autoVoiceOutput, addToast]);
+  }, [isProcessing, addMessage, autoVoiceOutput]);
   
-  const playAudio = (messageId, audioPath) => {
+  const playAudio = useCallback((messageId, audioPath) => {
     // Stop any currently playing audio
     if (currentlyPlayingAudio) {
       const audio = audioRefs.current[currentlyPlayingAudio];
@@ -479,7 +487,7 @@ const ChatPage = () => {
     });
     
     setCurrentlyPlayingAudio(messageId);
-  };
+  }, [volume, addToast, currentlyPlayingAudio]);
   
   const pauseAudio = (messageId) => {
     const audio = audioRefs.current[messageId];
@@ -540,7 +548,7 @@ const ChatPage = () => {
         {
           id: 'welcome',
           type: 'assistant',
-          content: 'Welcome to TRAVIS chat! You can type your message or use voice input. Press Alt + O to enable typing, Alt + S to send message, and Alt + V to start voice input. Press Alt + H for help.',
+          content: 'Welcome to TRAVIS chat! You can type your message or use voice input. Press Alt + O to enable typing, then press Enter to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + L to logout, and Alt + H for help.',
           audioPath: null,
           time: DateTime.now().toLocaleString(DateTime.TIME_SIMPLE)
         }
@@ -632,7 +640,7 @@ const ChatPage = () => {
       // Show standard toast for single message deletion
       addToast({
         title: 'Message Deleted',
-        message: 'The message has been removed from the chat',
+        message: 'The question has been removed from the chat',
         type: 'info',
         duration: config.TOAST_DURATION.SHORT
       });
@@ -691,6 +699,70 @@ const ChatPage = () => {
            );
   };
 
+  // Add keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Alt + O: Enable typing
+      if (e.altKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        const textarea = document.querySelector('textarea.form-control');
+        if (textarea) {
+          textarea.focus();
+          textarea.disabled = false;
+          speak("Chat input enabled. Type your message and press Enter to send.");
+        }
+      }
+      
+      // Alt + V: Toggle voice and start recording
+      if (e.altKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        if (!isRecording) {
+          handleSpeechRecognition();
+        }
+      }
+
+      // Alt + B: Go back to home
+      if (e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        navigate('/');
+        speak("Going back to home page");
+      }
+
+      // Alt + L: Logout
+      if (e.altKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        if (isAuthenticated) {
+          logout();
+          navigate('/');
+          speak("Logged out successfully");
+          addToast({
+            title: 'Logged Out',
+            message: 'You have been logged out successfully',
+            type: 'success',
+            duration: config.TOAST_DURATION.MEDIUM
+          });
+        } else {
+          speak("You are not logged in");
+          addToast({
+            title: 'Not Logged In',
+            message: 'You are not currently logged in',
+            type: 'warning',
+            duration: config.TOAST_DURATION.MEDIUM
+          });
+        }
+      }
+
+      // Alt + H: Help
+      if (e.altKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        speak("Available shortcuts: Alt + O to enable typing, then press Enter to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + L to logout, and Alt + H for help.");
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording, handleSubmit, handleSpeechRecognition, navigate, isAuthenticated, addToast, logout]);
+
   // Initialize chat
   useEffect(() => {
     // Initialize speech recognition
@@ -723,77 +795,6 @@ const ChatPage = () => {
       hasAnnounced.current = false;
     };
   }, []);
-
-  // Add keyboard shortcuts - moved after all function declarations
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Alt + O: Enable typing
-      if (e.altKey && e.key.toLowerCase() === 'o') {
-        e.preventDefault();
-        const textarea = document.querySelector('textarea.form-control');
-        if (textarea) {
-          textarea.focus();
-          textarea.disabled = false;
-          speak("Chat input enabled. Type your message and press Alt + S to send.");
-        }
-      }
-      
-      // Alt + S: Send message
-      if (e.altKey && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        const textarea = document.querySelector('textarea.form-control');
-        if (textarea && textarea.value.trim()) {
-          handleSubmit(textarea.value);
-          textarea.value = ''; // Clear input after sending
-          textarea.disabled = true; // Disable input after sending
-          // Reset textarea height
-          textarea.style.height = 'auto';
-        }
-      }
-      
-      // Alt + V: Toggle voice and start recording
-      if (e.altKey && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        if (!isRecording) {
-          handleSpeechRecognition();
-        }
-      }
-
-      // Alt + B: Go back to home
-      if (e.altKey && e.key.toLowerCase() === 'b') {
-        e.preventDefault();
-        navigate('/');
-        speak("Going back to home page");
-      }
-
-      // Alt + C: Go to chat
-      if (e.altKey && e.key.toLowerCase() === 'c') {
-        e.preventDefault();
-        if (isAuthenticated) {
-          navigate('/chat');
-          speak("Going to chat page");
-        } else {
-          speak("Please login to access the chat page");
-          addToast({
-            title: 'Authentication Required',
-            message: 'Please login to access the chat page',
-            type: 'warning',
-            duration: config.TOAST_DURATION.MEDIUM
-          });
-          navigate('/login');
-        }
-      }
-
-      // Alt + H: Help
-      if (e.altKey && e.key.toLowerCase() === 'h') {
-        e.preventDefault();
-        speak("Available shortcuts: Alt + O to enable typing, Alt + S to send message, Alt + V to start voice input, Alt + B to go back to home, Alt + C to go to chat, and Alt + H for help.");
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isRecording, handleSubmit, handleSpeechRecognition, navigate, isAuthenticated, addToast]);
 
   return (
     <main id="main-content" className="main-container">
